@@ -1,851 +1,334 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#6f2b82" />
-  <link rel="icon" type="image/png" href="images/Benevolent_transparent_icon.png" />
-  <link rel="apple-touch-icon" href="images/Benevolent_transparent_icon.png" />
-  <title>Benevolent Apps</title>
-  <style>
-    :root {
-      --purple: #742d86;
-      --purple-dark: #572064;
-      --purple-deep: #3e1649;
-      --purple-soft: #f5eef8;
-      --purple-soft-2: #fbf8fc;
-      --ink: #241b29;
-      --muted: #746a78;
-      --line: #e9e1eb;
-      --white: #ffffff;
-      --shadow: 0 18px 45px rgba(55, 27, 63, 0.10);
-      --shadow-hover: 0 24px 60px rgba(55, 27, 63, 0.16);
-      --radius-xl: 26px;
-      --radius-lg: 19px;
-      --radius-md: 14px;
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#6f2b82">
+<link rel="icon" type="image/png" href="images/Benevolent_transparent_icon.png">
+<title>Pre-Payroll Check</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{--purple:#742d86;--deep:#3e1649;--soft:#f5eef8;--ink:#241b29;--muted:#746a78;--line:#e9e1eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);
+background:radial-gradient(circle at 10% -10%,rgba(123,52,143,.13),transparent 28rem),#faf8fb;min-height:100vh}
+.shell{width:min(1100px,calc(100% - 28px));margin:0 auto}
+header{padding:22px 0 8px;display:flex;align-items:center;justify-content:space-between}
+header img{width:210px;max-width:55vw;height:auto}
+h1{margin:18px 0 4px;font-size:clamp(28px,4.5vw,40px);letter-spacing:-.03em;color:var(--deep)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 20px}
+.card{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:0 10px 32px rgba(53,27,59,.06);padding:22px;margin-bottom:18px}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:2px dashed #d9cddd;border-radius:18px;padding:30px 16px;text-align:center;cursor:pointer;transition:.2s}
+.drop:hover,.drop.over{border-color:var(--purple);background:var(--soft)}
+.drop b{color:var(--deep);font-size:17px}.drop span{color:var(--muted);font-size:13px}
+.btn{appearance:none;border:0;border-radius:12px;padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer;background:var(--purple);color:#fff}
+.btn:hover{background:#572064}.btn.ghost{background:var(--soft);color:var(--purple)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.label{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--purple);margin-bottom:6px}
+.subject{font-size:16px;font-weight:600}
+#emailBox{border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:12px;overflow-x:auto;background:#fff}
+.status{font-size:14px;color:var(--muted)}.err{color:#b00020;font-weight:600}
+.ok{color:#1b7f3b;font-weight:700}
+.x{border:0;background:none;color:#b9a9bf;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px}
+.x:hover{color:#b00020}
+.act{width:100%;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px}
+.tools th.t,.tools td.t{background:#faf6fb;border:1px solid #e9e1eb !important}
+.hidden{display:none}
+footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
+.copied{background:#1b7f3b !important;color:#fff !important}
+</style></head><body>
+<div class="shell">
+<header><img src="images/Benevolent_transparent_logo.png" alt="" onerror="this.style.display='none'"></header>
+<h1>Pre-Payroll Check</h1>
+<p class="sub">Upload the HHAx Pre-process Payroll Detail file. Files stay on your computer.</p>
+
+<div class="card">
+  <label class="drop" id="drop"><b>Choose file or drop it here</b><span>.xlsx</span>
+  <input id="file" type="file" accept=".xlsx,.xls" class="hidden"></label>
+  <div id="status" class="status" style="margin-top:12px"></div>
+</div>
+
+<div id="results" class="hidden">
+  <div class="card">
+    <div class="row"><div><div class="label">Subject</div><div class="subject" id="subject">Pre-payroll file review results (FYI)</div></div>
+    <button class="btn ghost" id="copySubject">Copy subject</button></div>
+  </div>
+  <div class="card">
+    <div class="row"><div class="label" style="margin:0">Email</div><button class="btn" id="copyBody">Copy for email</button></div>
+    <div id="emailBox"></div>
+  </div>
+</div>
+<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v1</footer>
+</div>
+<script>
+
+// ============================================================
+// APPROVED OVERRIDE RATES  (edit names / rates here only)
+// Same list as the Python script's approved_rates.
+// ============================================================
+const APPROVED_RATES = {
+  "Diarra Epse Ouattara Aminata": 20.50,
+  "Zaynieva Shakhnoz": 21.50,
+  "Rahimova Iroda": 21.50,
+  "Shukurova Gulnoza": 21.50,
+  "Salieva Nilufar": 21.50,
+  "Kamoliddinova Shahzodahon": 21.50,
+  "Grullon Urena Yelissbet": 21.00,
+  // Add more caregivers and their approved rates as needed
+};
+const IN_SERVICE_PAY_CODES = ["HHA In-Service", "PCA In-Service"];
+const SHEET_NAME = "Pre-Process Payroll Hours by Ca";
+// ============================================================
+
+function pyStr(v){ // mimic pandas/python str() of a cell
+  if (v === null || v === undefined) return "nan";
+  if (typeof v === "number") { if (Number.isNaN(v)) return "nan"; return String(v); }
+  if (v instanceof Date) { const p=n=>String(n).padStart(2,"0"); return `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`; }
+  return String(v);
+}
+function notNull(v){ return !(v === null || v === undefined || (typeof v === "number" && Number.isNaN(v))); }
+function pyFloat(s){ // strict like python float(); throws on bad input
+  const t = String(s).trim();
+  if (/^[+-]?nan$/i.test(t)) return NaN;
+  if (/^[+-]?(inf|infinity)$/i.test(t)) return t.startsWith("-") ? -Infinity : Infinity;
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t.replace(/_/g,""))) throw new Error("bad float");
+  return Number(t.replace(/_/g,""));
+}
+function pyRepr(x){ if (Number.isInteger(x)) return x.toFixed(1); return String(x); }
+function parseHHMM(value){
+  if (typeof value === "string" && value.includes(":")) {
+    const parts = value.split(":");
+    if (parts.every(p => /^\d+$/.test(p))) {
+      if (parts.length !== 2) throw new Error("unpack");
+      return parseInt(parts[0],10) + parseInt(parts[1],10)/60.0;
     }
-
-    * { box-sizing: border-box; }
-
-    html { scroll-behavior: smooth; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 10% -10%, rgba(123, 52, 143, .13), transparent 28rem),
-        radial-gradient(circle at 90% 6%, rgba(123, 52, 143, .08), transparent 24rem),
-        #faf8fb;
-    }
-
-    button, input { font: inherit; }
-    a { color: inherit; }
-
-    .shell {
-      width: min(1160px, calc(100% - 32px));
-      margin: 0 auto;
-    }
-
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      border-bottom: 1px solid rgba(116, 45, 134, .08);
-      background: rgba(250, 248, 251, .88);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-    }
-
-    .topbar-inner {
-      min-height: 78px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 24px;
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      text-decoration: none;
-      min-width: 0;
-    }
-
-    .brand img {
-      display: block;
-      width: 238px;
-      max-width: 62vw;
-      height: auto;
-    }
-
-    .top-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .mini-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 13px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255,255,255,.78);
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 750;
-      letter-spacing: .02em;
-      white-space: nowrap;
-    }
-
-    .mini-pill .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--purple);
-      box-shadow: 0 0 0 4px rgba(116,45,134,.10);
-    }
-
-    .hero {
-      padding: 68px 0 42px;
-    }
-
-    .hero-card {
-      position: relative;
-      overflow: hidden;
-      padding: 50px;
-      border: 1px solid rgba(116,45,134,.12);
-      border-radius: 32px;
-      background:
-        linear-gradient(125deg, rgba(255,255,255,.98), rgba(252,248,253,.94)),
-        var(--white);
-      box-shadow: var(--shadow);
-    }
-
-    .hero-card::before {
-      content: "";
-      position: absolute;
-      width: 360px;
-      height: 360px;
-      right: -150px;
-      top: -170px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(116,45,134,.16), rgba(116,45,134,0) 68%);
-      pointer-events: none;
-    }
-
-    .hero-card::after {
-      content: "";
-      position: absolute;
-      width: 245px;
-      height: 245px;
-      right: 34px;
-      bottom: -54px;
-      background: url("images/Benevolent_transparent_icon.png") center / contain no-repeat;
-      opacity: .055;
-      pointer-events: none;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      margin-bottom: 18px;
-      color: var(--purple);
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-    }
-
-    .eyebrow svg { width: 16px; height: 16px; }
-
-    h1 {
-      margin: 0;
-      max-width: 720px;
-      font-size: clamp(38px, 6vw, 66px);
-      line-height: .98;
-      letter-spacing: -.045em;
-      color: var(--purple-deep);
-    }
-
-    .hero-copy {
-      max-width: 700px;
-      margin: 20px 0 0;
-      color: var(--muted);
-      font-size: clamp(16px, 2vw, 19px);
-      line-height: 1.65;
-    }
-
-    .hero-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 30px;
-    }
-
-    .hero-meta span {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 12px;
-      border: 1px solid rgba(116,45,134,.12);
-      border-radius: 999px;
-      background: var(--purple-soft-2);
-      color: #624f67;
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .toolbar {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 14px;
-      align-items: center;
-      margin: 0 0 26px;
-    }
-
-    .search-wrap {
-      position: relative;
-      min-width: 0;
-    }
-
-    .search-wrap svg {
-      position: absolute;
-      left: 18px;
-      top: 50%;
-      width: 19px;
-      height: 19px;
-      transform: translateY(-50%);
-      color: #95899a;
-      pointer-events: none;
-    }
-
-    .search {
-      width: 100%;
-      height: 54px;
-      padding: 0 18px 0 50px;
-      border: 1px solid var(--line);
-      outline: none;
-      border-radius: 16px;
-      background: rgba(255,255,255,.9);
-      color: var(--ink);
-      box-shadow: 0 8px 26px rgba(53,27,59,.045);
-      transition: border-color .2s ease, box-shadow .2s ease;
-    }
-
-    .search:focus {
-      border-color: rgba(116,45,134,.42);
-      box-shadow: 0 0 0 4px rgba(116,45,134,.08), 0 10px 30px rgba(53,27,59,.06);
-    }
-
-    .search::placeholder { color: #a398a7; }
-
-    .count-pill {
-      height: 54px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 18px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: rgba(255,255,255,.9);
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 750;
-      white-space: nowrap;
-    }
-
-    .content { padding: 6px 0 72px; }
-
-    .section {
-      margin-top: 34px;
-    }
-
-    .section:first-child { margin-top: 0; }
-
-    .section-head {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 16px;
-      margin: 0 2px 15px;
-    }
-
-    .section-title-wrap { min-width: 0; }
-
-    .section-kicker {
-      margin-bottom: 5px;
-      color: var(--purple);
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .11em;
-      text-transform: uppercase;
-    }
-
-    .section-title {
-      margin: 0;
-      font-size: 23px;
-      line-height: 1.2;
-      letter-spacing: -.02em;
-      color: #35273a;
-    }
-
-    .section-note {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .apps-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px;
-    }
-
-    .app-card {
-      position: relative;
-      min-height: 230px;
-      display: flex;
-      flex-direction: column;
-      padding: 25px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-xl);
-      background: rgba(255,255,255,.94);
-      text-decoration: none;
-      box-shadow: 0 10px 32px rgba(53,27,59,.055);
-      overflow: hidden;
-      isolation: isolate;
-      transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
-    }
-
-    .app-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(116,45,134,.25);
-      box-shadow: var(--shadow-hover);
-    }
-
-    .app-card:focus-visible {
-      outline: none;
-      box-shadow: 0 0 0 4px rgba(116,45,134,.10), var(--shadow-hover);
-    }
-
-    .app-card::after {
-      content: "";
-      position: absolute;
-      z-index: -1;
-      right: -48px;
-      bottom: -55px;
-      width: 170px;
-      height: 170px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(116,45,134,.09), rgba(116,45,134,0) 70%);
-      transition: transform .25s ease;
-    }
-
-    .app-card:hover::after { transform: scale(1.18); }
-
-    .card-top {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 20px;
-    }
-
-    .icon-box {
-      width: 52px;
-      height: 52px;
-      flex: 0 0 52px;
-      display: grid;
-      place-items: center;
-      border: 1px solid rgba(116,45,134,.12);
-      border-radius: 16px;
-      background: linear-gradient(145deg, #fbf7fc, #f2e8f5);
-      color: var(--purple);
-    }
-
-    .icon-box svg { width: 25px; height: 25px; }
-
-    .icon-box img {
-      width: 34px;
-      height: 34px;
-      object-fit: contain;
-      display: block;
-    }
-
-    .launch {
-      width: 38px;
-      height: 38px;
-      flex: 0 0 38px;
-      display: grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      color: #87768d;
-      transition: color .2s ease, border-color .2s ease, transform .2s ease;
-    }
-
-    .launch svg { width: 17px; height: 17px; }
-
-    .app-card:hover .launch {
-      color: var(--purple);
-      border-color: rgba(116,45,134,.22);
-      transform: translate(2px, -2px);
-    }
-
-    .app-title {
-      margin: 22px 0 7px;
-      font-size: 22px;
-      line-height: 1.2;
-      letter-spacing: -.025em;
-      color: #322536;
-    }
-
-    .app-desc {
-      margin: 0;
-      max-width: 90%;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.55;
-    }
-
-    .card-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: auto;
-      padding-top: 22px;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      padding: 7px 10px;
-      border-radius: 999px;
-      background: var(--purple-soft);
-      color: #6b4272;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .02em;
-    }
-
-    .domain {
-      overflow: hidden;
-      color: #a092a5;
-      font-size: 11px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .empty-state {
-      display: none;
-      padding: 34px 24px;
-      border: 1px dashed #d9cddd;
-      border-radius: 20px;
-      background: rgba(255,255,255,.55);
-      color: var(--muted);
-      text-align: center;
-    }
-
-    .empty-state strong {
-      display: block;
-      margin-bottom: 5px;
-      color: #443649;
-    }
-
-    footer {
-      border-top: 1px solid var(--line);
-      background: rgba(255,255,255,.62);
-    }
-
-    .footer-inner {
-      min-height: 156px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 34px;
-      padding: 28px 0;
-    }
-
-    .footer-brand img {
-      display: block;
-      width: 210px;
-      max-width: 62vw;
-      height: auto;
-      opacity: .94;
-    }
-
-    .footer-copy {
-      margin-top: 10px;
-      color: #8a7d8e;
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .footer-right {
-      max-width: 430px;
-      text-align: right;
-      color: #7f7283;
-      font-size: 12px;
-      line-height: 1.75;
-    }
-
-    .footer-right strong {
-      color: #57485c;
-      font-weight: 800;
-    }
-
-    .project-line {
-      margin-top: 5px;
-      color: #a094a4;
-      font-size: 11px;
-    }
-
-    @media (max-width: 780px) {
-      .shell { width: min(100% - 22px, 1160px); }
-      .topbar-inner { min-height: 70px; }
-      .brand img { width: 205px; }
-      .mini-pill { display: none; }
-      .hero { padding: 34px 0 26px; }
-      .hero-card { padding: 31px 24px; border-radius: 25px; }
-      .hero-card::after { right: 15px; width: 190px; height: 190px; bottom: -38px; }
-      .toolbar { grid-template-columns: 1fr; }
-      .count-pill { display: none; }
-      .apps-grid { grid-template-columns: 1fr; }
-      .app-card { min-height: 215px; }
-      .section-head { align-items: flex-start; }
-      .footer-inner { align-items: flex-start; flex-direction: column; }
-      .footer-right { text-align: left; }
-    }
-
-    @media (max-width: 480px) {
-      .app-card { padding: 22px; border-radius: 22px; }
-      .app-desc { max-width: 100%; }
-      .hero-meta span:nth-child(3) { display: none; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        scroll-behavior: auto !important;
-        transition: none !important;
-      }
-    }
-  </style>
-</head>
-<body>
-  <header class="topbar">
-    <div class="shell topbar-inner">
-      <a class="brand" href="#" aria-label="Benevolent Apps home">
-        <img src="images/Benevolent_transparent_logo.png" alt="Benevolent Home Care" />
-      </a>
-      <div class="top-actions">
-        <span class="mini-pill"><span class="dot"></span> Apps & Useful Links</span>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="shell">
-        <div class="hero-card">
-          <div class="eyebrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="7" height="7" rx="2"></rect>
-              <rect x="14" y="3" width="7" height="7" rx="2"></rect>
-              <rect x="3" y="14" width="7" height="7" rx="2"></rect>
-              <rect x="14" y="14" width="7" height="7" rx="2"></rect>
-            </svg>
-            Benevolent Home Care
-          </div>
-          <h1>Benevolent Apps</h1>
-          <p class="hero-copy">One place for Benevolent’s custom tools and frequently used agency resources. Open what you need without keeping track of separate bookmarks.</p>
-          <div class="hero-meta">
-            <span>Custom tools</span>
-            <span>Useful links</span>
-            <span>Built for daily operations</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="content">
-      <div class="shell">
-        <div class="toolbar">
-          <label class="search-wrap" aria-label="Search apps and links">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="7"></circle>
-              <path d="m20 20-3.5-3.5"></path>
-            </svg>
-            <input id="searchInput" class="search" type="search" placeholder="Search apps and links..." autocomplete="off" />
-          </label>
-          <div id="countPill" class="count-pill">2 resources</div>
-        </div>
-
-        <div id="sections"></div>
-
-        <div id="emptyState" class="empty-state">
-          <strong>No matching resource found.</strong>
-          Try a different search term.
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <div class="shell footer-inner">
-      <div class="footer-brand">
-        <img src="images/Benevolent_transparent_logo.png" alt="Benevolent Home Care" />
-        <div class="footer-copy">Compassionate care. Dependable support. Dignity at home.</div>
-      </div>
-      <div class="footer-right">
-        <strong>Benevolent Home Care LLC</strong><br />
-        1021 McDonald Avenue, Brooklyn, NY 11230<br />
-        718-345-1000 &nbsp;·&nbsp; benevolenthomecare.com
-        <div class="project-line">A Davidowitz Project © <span id="year"></span> · Benevolent Apps v5</div>
-      </div>
-    </div>
-  </footer>
-
-  <script>
-    /*
-      Add future apps or links here.
-      category controls which section the card appears under.
-    */
-    const resources = [
-      {
-        title: "Fax Cover Generator",
-        description: "Create a polished fax cover sheet, attach the pages being faxed, and download one combined PDF.",
-        url: "https://mosesdavidowitz.github.io/Fax_Cover_Generator/",
-        category: "Document & Communication Tools",
-        kicker: "Custom Apps",
-        tag: "Fax",
-        icon: "fax"
-      },
-      {
-        title: "Letter Generator",
-        description: "Create Benevolent-branded letters with recipient details, subject, signatures, and a ready-to-use PDF.",
-        url: "https://mosesdavidowitz.github.io/Benevolent_Letter_Generator/",
-        category: "Document & Communication Tools",
-        kicker: "Custom Apps",
-        tag: "Letters",
-        icon: "letter"
-      },
-      {
-        title: "LS-62 Generator",
-        description: "Prepare Benevolent LS-62 wage notices with the required employee and compensation details.",
-        url: "https://mosesdavidowitz.github.io/Benevolent_LS62/",
-        category: "HR & Compliance",
-        kicker: "Custom Apps",
-        tag: "LS-62",
-        icon: "letter"
-      },
-      {
-        title: "Payroll · Office Employees",
-        description: "Access the payroll and employee self-service portal for Benevolent office staff.",
-        url: "https://secure5.saashr.com/ta/CA201.login",
-        category: "Payroll & Employee Portals",
-        kicker: "Employee Portal",
-        tag: "Office",
-        icon: "link"
-      },
-      {
-        title: "Payroll · Caregivers",
-        description: "Access the payroll and employee self-service portal for Benevolent caregivers.",
-        url: "https://secure5.saashr.com/ta/CA200.login",
-        category: "Payroll & Employee Portals",
-        kicker: "Employee Portal",
-        tag: "Caregivers",
-        icon: "link"
-      },
-      {
-        title: "Caregiver Staffing Map",
-        description: "Find the nearest scheduled or active caregivers to a patient for same-day and next-day coverage.",
-        url: "https://mosesdavidowitz.github.io/staffing_dashboard/",
-        category: "Operations & Reporting",
-        kicker: "Custom Apps",
-        tag: "Staffing",
-        icon: "map"
-      },
-      {
-        title: "Incident / Hospitalization Report",
-        description: "Submit an incident or hospitalization report using the agency reporting form.",
-        url: "https://forms.medd.us/251273469867976",
-        category: "Operations & Reporting",
-        kicker: "Agency Form",
-        tag: "Report",
-        icon: "link"
-      },
-      {
-        title: "Gimbal",
-        description: "Open the Gimbal portal for Benevolent electronic timesheet and workflow access.",
-        url: "https://apps.thegimbal.net/login",
-        category: "Operations & Reporting",
-        kicker: "External System",
-        tag: "Gimbal",
-        logo: "images/gimbal.png",
-        icon: "link"
-      },
-      {
-        title: "HHAeXchange",
-        description: "Access HHAeXchange for scheduling, EVV, visits, billing, and day-to-day home care operations.",
-        url: "https://app.hhaexchange.com/identity/account/login",
-        category: "Operations & Reporting",
-        kicker: "Agency System",
-        tag: "HHAx",
-        logo: "images/HHAx.png",
-        icon: "link"
-      },
-      {
-        title: "EVV DOH Reporting Calculator",
-        description: "Generate the quarterly DOH EVV compliance submission rows from HHAeXchange reports. Files stay on your computer.",
-        url: "https://mosesdavidowitz.github.io/evv_doh_calculator/",
-        category: "HR & Compliance",
-        kicker: "Custom Apps",
-        tag: "EVV",
-        icon: "chart"
-      },
-      {
-        title: "ARLA",
-        description: "Access Benevolent's ARLA portal for caregiver training and in-service education.",
-        url: "https://benevolent.arla.ai/login",
-        category: "HR & Compliance",
-        kicker: "Training",
-        tag: "ARLA",
-        logo: "images/Arla.png",
-        icon: "link"
-      }
-    ];
-
-    const iconSvg = {
-      fax: `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M7 8V3h10v5"></path>
-          <rect x="4" y="8" width="16" height="9" rx="2"></rect>
-          <path d="M7 14h10v7H7z"></path>
-          <path d="M17 11h.01"></path>
-        </svg>`,
-      letter: `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M7 3h8l4 4v14H7z"></path>
-          <path d="M15 3v5h4"></path>
-          <path d="M10 12h6"></path>
-          <path d="M10 16h6"></path>
-        </svg>`,
-      map: `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"></path>
-          <circle cx="12" cy="10" r="2.2"></circle>
-        </svg>`,
-      chart: `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 20V4"></path>
-          <path d="M4 20h16"></path>
-          <path d="M8 16v-4"></path>
-          <path d="M12 16V8"></path>
-          <path d="M16 16v-6"></path>
-        </svg>`,
-      link: `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path>
-          <path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"></path>
-        </svg>`
-    };
-
-    const externalArrow = `
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M7 17 17 7"></path>
-        <path d="M8 7h9v9"></path>
-      </svg>`;
-
-    const sectionsEl = document.getElementById("sections");
-    const searchInput = document.getElementById("searchInput");
-    const emptyState = document.getElementById("emptyState");
-    const countPill = document.getElementById("countPill");
-
-    function getHost(url) {
+  }
+  return null;
+}
+function f2(x){ return x.toFixed(2); }
+
+function runChecks(rows){
+  // rows: array of arrays, index = pandas row index, col index = pandas column
+  const cell = (r,c) => (rows[r] && rows[r][c] !== undefined) ? rows[r][c] : null;
+  const rowHas = (r, s) => { const row = rows[r] || []; const n = Math.max(row.length, 1);
+    for (let c=0;c<n;c++){ if (pyStr(row[c]===undefined?null:row[c]).includes(s)) return true; } return false; };
+  const N = rows.length;
+  const caregiverRows = [], totalRows = [];
+  for (let r=0;r<N;r++){ if (rowHas(r,"Caregiver Code:")) caregiverRows.push(r); if (rowHas(r,"Total")) totalRows.push(r); }
+  let lastTotal=-1, grandTotal=-1;
+  if (totalRows.length > 1){ lastTotal = totalRows[totalRows.length-2]; grandTotal = totalRows[totalRows.length-1]; }
+  const exclude = new Set([lastTotal, grandTotal]);
+  const inSvc = new Set(IN_SERVICE_PAY_CODES.map(c=>c.toLowerCase()));
+  const liveIn = ["T1020","T1020:TV"];
+  const problems = [];
+  const patientDay = new Map();
+  const push = (code,name,row,problem,detail) => problems.push({code,name,row,problem,detail:String(detail)});
+
+  for (let idx=0; idx<caregiverRows.length; idx++){
+    const start = caregiverRows[idx];
+    const end = idx < caregiverRows.length-1 ? caregiverRows[idx+1] : N;
+    const sec = []; for (let r=start;r<end;r++) sec.push(r);
+    const tl = sec.filter(r => rowHas(r,"Total:")).sort((a,b)=>a-b);
+    let totalIn = new Set(), extra = new Set();
+    if (tl.length){ totalIn = new Set([tl[0]]); extra = new Set(tl.slice(1)); }
+    const hc = cell(start,1);
+    const header = (typeof hc === "string") ? hc : "";
+    let code="", name="";
+    if (header.includes("Caregiver Code:")) code = header.split("Caregiver Code:").pop().split("Caregiver Name:")[0].trim();
+    if (header.includes("Caregiver Name:")) name = header.split("Caregiver Name:").pop().trim();
+    let hasLiveIn = false, inSvcHours = 0;
+    for (const ri of sec){
+      if (exclude.has(ri) || totalIn.has(ri) || extra.has(ri)) continue;
+      const svc = pyStr(cell(ri,8)).trim();
+      if (liveIn.includes(svc)) hasLiveIn = true;
       try {
-        return new URL(url).hostname.replace(/^www\./, "");
-      } catch {
-        return "";
+        const pc = pyStr(cell(ri,15)).trim();
+        const pid = notNull(cell(ri,2)) ? pyStr(cell(ri,2)).trim() : "";
+        const vh = parseHHMM(pyStr(cell(ri,11)));
+        const ph = parseHHMM(pyStr(cell(ri,14)));
+        const oh = parseHHMM(pyStr(cell(ri,22)));
+        const looks = svc === "0" && !pid && vh !== null && vh === 0;
+        if (inSvc.has(pc.toLowerCase()) || looks) inSvcHours += (ph||0) + (oh||0);
+      } catch(e) {}
+    }
+    for (const r of sec){
+      if (exclude.has(r) || extra.has(r)) continue;
+      let vds = "";
+      try { const v = cell(r,3);
+        if (v instanceof Date){ const p=n=>String(n).padStart(2,"0"); vds = `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())}`; }
+        else if (typeof v === "string" && v.trim()) vds = v.trim();
+      } catch(e){ vds = ""; }
+      const sc = pyStr(cell(r,8)).trim();
+      const pc = pyStr(cell(r,15)).trim();
+      const phs = pyStr(cell(r,14));
+      const ph = parseHHMM(phs);
+      const ohs = pyStr(cell(r,22));
+      const ohd = parseHHMM(ohs);
+      let tph = (ph||0) + (ohd||0);
+      let rate;
+      try { rate = pyFloat(pyStr(cell(r,17)).replace(/\$/g,"").replace(/,/g,"").trim()); } catch(e){ rate = 0; }
+      if (rate <= 0) tph = 0;
+      if (totalIn.has(r)){
+        const ots = pyStr(cell(r,22));
+        const ot = parseHHMM(ots);
+        if (ot !== null){
+          const net = Math.max(ot - inSvcHours, 0);
+          if (Object.prototype.hasOwnProperty.call(APPROVED_RATES,name) && ot > 0)
+            push(code,name,r,"Overtime for caregiver with approved override rate",`Approved Rate: $${f2(APPROVED_RATES[name])} | Total OT: ${ots}`);
+          const det = inSvcHours === 0 ? `Total OT: ${ots}` : `Total OT: ${ots} (In-Service: ${f2(inSvcHours)} hrs, Net OT: ${f2(net)} hrs)`;
+          if (hasLiveIn){ if (net > 12) push(code,name,r,"Net OT hours for Live-In exceed 12:00",det); }
+          else { if (net > 8) push(code,name,r,"Net OT hours for Non-Live-In exceed 08:00",det); }
+        }
+      } else {
+        let pn="", pid="";
+        try { pn = notNull(cell(r,1)) ? pyStr(cell(r,1)).trim() : ""; pid = notNull(cell(r,2)) ? pyStr(cell(r,2)).trim() : ""; } catch(e){}
+        const pidN = (pid.endsWith(".0") ? pid.slice(0,-2) : pid).trim();
+        if (pidN === "900515" || pidN === "WSF-900515" || pn.toLowerCase() === "training evv")
+          push(code,name,r,`TRAINING EVV PATIENT FOUND - DO NOT PAY - ${vds}`,`Patient: ${pn} | Admission ID: ${pidN}`);
+        let vhs = "", vh = null;
+        try { vhs = pyStr(cell(r,11)); vh = parseHHMM(vhs); } catch(e){ vhs=""; vh=null; }
+        let isIn = inSvc.has(pc.toLowerCase());
+        const looks = sc === "0" && !pid && vh !== null && vh === 0;
+        const nonPay = pc.toLowerCase().includes("non payable");
+        if (nonPay && looks) isIn = true;
+        if (nonPay) push(code,name,r,`${isIn?"In-Service":"Visit"} marked as Non Payable - ${vds}`, pyStr(cell(r,15)));
+        if (!isIn && pn && pid && vds && tph > 0){
+          const k = pid + "\u0001" + vds;
+          if (!patientDay.has(k)) patientDay.set(k,{pid, dos:vds, pname:pn, entries:[]});
+          patientDay.get(k).entries.push({code,name,row:r,pay:phs,ot:ohs,tph});
+        }
+        try {
+          if (looks && !isIn && !nonPay)
+            push(code,name,r,`In-service paid with a non-in-service pay code - ${vds}`,`Pay Code Used: ${(pc && pc.toLowerCase() !== "nan") ? pc : "(blank)"}`);
+          if (liveIn.includes(sc) && vh !== null && vh < 13)
+            push(code,name,r,`Live-In visit is less than 13:00 - ${vds}`, vhs);
+          if (!isIn && !looks && tph > 0 && vh !== null){
+            let vb = Math.trunc(vh); if (vh > vb) vb += 1;
+            if (tph > vb) push(code,name,r,`Pay hours exceed visit hours - ${vds}`,`Pay: ${phs}, OT: ${ohs}, Visit: ${vhs}`);
+          }
+        } catch(e){}
       }
     }
-
-    function render(query = "") {
-      const normalized = query.trim().toLowerCase();
-      const filtered = resources.filter(item => {
-        const haystack = [item.title, item.description, item.category, item.kicker, item.tag, item.url].join(" ").toLowerCase();
-        return haystack.includes(normalized);
-      });
-
-      const grouped = filtered.reduce((map, item) => {
-        if (!map.has(item.category)) map.set(item.category, []);
-        map.get(item.category).push(item);
-        return map;
-      }, new Map());
-
-      sectionsEl.innerHTML = "";
-
-      grouped.forEach((items, category) => {
-        const section = document.createElement("section");
-        section.className = "section";
-
-        const kicker = items[0]?.kicker || "Resources";
-        section.innerHTML = `
-          <div class="section-head">
-            <div class="section-title-wrap">
-              <div class="section-kicker">${kicker}</div>
-              <h2 class="section-title">${category}</h2>
-              <div class="section-note">${items.length} ${items.length === 1 ? "resource" : "resources"}</div>
-            </div>
-          </div>
-          <div class="apps-grid"></div>`;
-
-        const grid = section.querySelector(".apps-grid");
-
-        items.forEach(item => {
-          const card = document.createElement("a");
-          card.className = "app-card";
-          card.href = item.url;
-          card.target = "_blank";
-          card.rel = "noopener noreferrer";
-          card.setAttribute("aria-label", `${item.title}, opens in a new tab`);
-          card.innerHTML = `
-            <div class="card-top">
-              <div class="icon-box">${item.logo ? `<img src="${item.logo}" alt="" />` : (iconSvg[item.icon] || iconSvg.link)}</div>
-              <div class="launch">${externalArrow}</div>
-            </div>
-            <h3 class="app-title">${item.title}</h3>
-            <p class="app-desc">${item.description}</p>
-            <div class="card-footer">
-              <span class="tag">${item.tag}</span>
-              <span class="domain">${getHost(item.url)}</span>
-            </div>`;
-          grid.appendChild(card);
-        });
-
-        sectionsEl.appendChild(section);
-      });
-
-      emptyState.style.display = filtered.length ? "none" : "block";
-      countPill.textContent = `${filtered.length} ${filtered.length === 1 ? "resource" : "resources"}`;
-    }
-
-    searchInput.addEventListener("input", event => render(event.target.value));
-
-    document.addEventListener("keydown", event => {
-      if (event.key === "/" && document.activeElement !== searchInput) {
-        event.preventDefault();
-        searchInput.focus();
+    // PAY RATE CHECK
+    for (const r of sec){
+      const v17 = cell(r,17);
+      const isStrOrFloat = (typeof v17 === "string") || (typeof v17 === "number" && !Number.isInteger(v17)) || !notNull(v17);
+      if (isStrOrFloat && !exclude.has(r) && !extra.has(r)){
+        let reg;
+        try { const s = pyStr(v17); reg = s.includes("$") ? pyFloat(s.replace(/\$/g,"").replace(/,/g,"")) : pyFloat(s); } catch(e){ continue; }
+        const hv = cell(r,29); let hol = null;
+        try { if (notNull(hv)){ const hs = pyStr(hv).trim(); if (hs && hs.toLowerCase() !== "nan") hol = pyFloat(hs.replace(/\$/g,"").replace(/,/g,"")); } } catch(e){ hol = null; }
+        const isHol = hol !== null;
+        const chk = isHol ? hol : reg;
+        const prc = pyStr(cell(r,15));
+        const base = prc === "PND LPN Hourly" ? 35.00 : (Object.prototype.hasOwnProperty.call(APPROVED_RATES,name) ? APPROVED_RATES[name] : 20.00);
+        const lim = base * (isHol ? 1.5 : 1.0);
+        if (chk > lim) push(code,name,r, isHol ? `Holiday rate exceeds $${f2(lim)} (1.5x approved rate)` : `Pay rate exceeds $${f2(lim)}`, `$${pyRepr(chk)}`);
       }
-    });
+    }
+  }
+  for (const info of patientDay.values()){
+    const tot = info.entries.reduce((a,e)=>a+(e.tph||0),0);
+    if (tot > 24) for (const e of info.entries)
+      push(e.code,e.name,e.row,`Patient day exceeds 24:00 - ${info.pname} (${info.pid}) - ${info.dos}`,`Day Total: ${f2(tot)} hrs | This Row Pay: ${e.pay}, OT: ${e.ot}`);
+  }
+  return problems;
+}
 
-    document.getElementById("year").textContent = new Date().getFullYear();
-    render();
-  </script>
-</body>
-</html>
+
+const SENT_A = "These were flagged by our scripts for awareness only. All items are still being included in payroll as is, and no payroll changes were made based on this review.";
+const SENT_B = "These were flagged by our scripts for awareness only. Items are included in payroll as is unless an action is noted below.";
+let ITEMS = [];
+
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const TD = 'style="border:1px solid #000;padding:4px 8px;vertical-align:top;"';
+const TH = 'style="border:1px solid #000;padding:4px 8px;font-weight:bold;text-align:left;background:#f2f2f2;"';
+
+function emailHTML(forCopy){
+  const live = ITEMS.filter(i=>!i.removed);
+  const anyAct = live.some(i=>i.action.trim());
+  let h = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#000;">';
+  h += '<p>Good morning,</p>';
+  if (!live.length){
+    h += '<p>Below are the results from our internal pre-payroll checks.</p><p>No issues were found by our scripts this week.</p></div>';
+    return h;
+  }
+  h += '<p>Below are the results from our internal pre-payroll checks.</p>';
+  h += '<p>' + (anyAct ? SENT_B : SENT_A) + '</p>';
+  h += '<table style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:13px;" class="tools"><tr>';
+  ['Caregiver Code','Caregiver Name','Problem','Detail'].forEach(c=> h += `<th ${TH}>${c}</th>`);
+  if (anyAct) h += `<th ${TH}>Action Taken</th>`;
+  if (!forCopy) h += '<th class="t" style="padding:4px 8px;font-size:11px;color:#746a78;text-align:left">Action (optional)</th><th class="t"></th>';
+  h += '</tr>';
+  ITEMS.forEach((it,i)=>{
+    if (it.removed) return;
+    h += `<tr><td ${TD}>${esc(it.code)}</td><td ${TD}>${esc(it.name)}</td><td ${TD}>${esc(it.problem)}</td><td ${TD}>${esc(it.detail)}</td>`;
+    if (anyAct) h += `<td ${TD}>${esc(it.action)}</td>`;
+    if (!forCopy) h += `<td class="t" style="padding:4px"><input class="act" data-i="${i}" value="${esc(it.action)}" placeholder="Action taken"></td><td class="t"><button class="x" title="Remove from email" data-x="${i}">✕</button></td>`;
+    h += '</tr>';
+  });
+  h += '</table></div>';
+  return h;
+}
+function plain(){
+  const live = ITEMS.filter(i=>!i.removed);
+  const anyAct = live.some(i=>i.action.trim());
+  if (!live.length) return "Good morning,\n\nBelow are the results from our internal pre-payroll checks.\n\nNo issues were found by our scripts this week.";
+  let t = "Good morning,\n\nBelow are the results from our internal pre-payroll checks.\n\n" + (anyAct?SENT_B:SENT_A) + "\n\n";
+  t += ["Caregiver Code","Caregiver Name","Problem","Detail"].concat(anyAct?["Action Taken"]:[]).join("\t") + "\n";
+  live.forEach(it=> t += [it.code,it.name,it.problem,it.detail].concat(anyAct?[it.action]:[]).join("\t") + "\n");
+  return t;
+}
+function render(){
+  const box = document.getElementById("emailBox");
+  box.innerHTML = emailHTML(false);
+  box.querySelectorAll("input.act").forEach(inp=> inp.addEventListener("change", e=>{ ITEMS[+e.target.dataset.i].action = e.target.value; const f=document.activeElement; render(); }));
+  box.querySelectorAll("button.x").forEach(b=> b.addEventListener("click", e=>{ ITEMS[+e.currentTarget.dataset.x].removed = true; render(); }));
+  const n = ITEMS.filter(i=>!i.removed).length, rem = ITEMS.length - n;
+  setStatus(n ? `<span class="ok">${n} item${n===1?"":"s"} flagged</span>` + (rem?` · ${rem} removed · <a href="#" id="undo">undo</a>`:"") : '<span class="ok">No issues found</span>' + (rem?` · ${rem} removed · <a href="#" id="undo">undo</a>`:""));
+  const u = document.getElementById("undo"); if (u) u.onclick = e=>{e.preventDefault(); ITEMS.forEach(i=>i.removed=false); render();};
+}
+function setStatus(h){ document.getElementById("status").innerHTML = h; }
+
+async function copyRich(html, text, btn){
+  let ok = false;
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      await navigator.clipboard.write([new ClipboardItem({"text/html": new Blob([html],{type:"text/html"}), "text/plain": new Blob([text],{type:"text/plain"})})]);
+      ok = true;
+    }
+  } catch(e){}
+  if (!ok){
+    const d = document.createElement("div"); d.contentEditable = "true"; d.innerHTML = html;
+    d.style.position="fixed"; d.style.left="-9999px"; document.body.appendChild(d);
+    const r = document.createRange(); r.selectNodeContents(d); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    try { ok = document.execCommand("copy"); } catch(e){}
+    s.removeAllRanges(); d.remove();
+  }
+  const old = btn.textContent; btn.textContent = ok ? "Copied ✓" : "Copy failed"; btn.classList.add("copied");
+  setTimeout(()=>{ btn.textContent = old; btn.classList.remove("copied"); }, 1600);
+}
+document.getElementById("copyBody").onclick = e => copyRich(emailHTML(true), plain(), e.currentTarget);
+document.getElementById("copySubject").onclick = e => { const s = document.getElementById("subject").textContent; copyRich(esc(s), s, e.currentTarget); };
+
+function loadFile(f){
+  setStatus("Checking…");
+  const rd = new FileReader();
+  rd.onload = ev => {
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), {type:"array", cellDates:true});
+      const ws = wb.Sheets[SHEET_NAME];
+      if (!ws){ setStatus(`<span class="err">Sheet "${SHEET_NAME}" not found. Is this the Pre-process Payroll Detail export?</span>`); return; }
+      const ref = XLSX.utils.decode_range(ws["!ref"]);
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null, blankrows:true, range:{s:{r:0,c:0}, e:ref.e}});
+      ITEMS = runChecks(rows).map(p => ({...p, action:"", removed:false}));
+      document.getElementById("results").classList.remove("hidden");
+      render();
+    } catch(err){ setStatus(`<span class="err">Could not read the file: ${esc(err.message)}</span>`); }
+  };
+  rd.readAsArrayBuffer(f);
+}
+const fi = document.getElementById("file"), dr = document.getElementById("drop");
+fi.addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+["dragover","dragenter"].forEach(t=> dr.addEventListener(t, e=>{e.preventDefault(); dr.classList.add("over");}));
+["dragleave","drop"].forEach(t=> dr.addEventListener(t, e=>{e.preventDefault(); dr.classList.remove("over");}));
+dr.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+document.getElementById("yr").textContent = new Date().getFullYear();
+</script></body></html>
