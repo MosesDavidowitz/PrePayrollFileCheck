@@ -62,7 +62,7 @@ footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
     <div id="emailBox"></div>
   </div>
 </div>
-<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v3</footer>
+<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v4</footer>
 </div>
 <script>
 
@@ -206,6 +206,32 @@ function dstPatientDay(entries, tot){
   return null;
 }
 
+// v4: "Net OT hours for Non-Live-In exceed 08:00" on the fall-back night.
+// Skipped ONLY when ALL hold:
+//  a. the caregiver has at least one visit in this file (pay period) that covers
+//     the whole 1:00-2:00 AM hour on the computed fall-back night, using the
+//     SAME rule as the v3 patient-day skip (1st Sunday of November computed per
+//     year; visit dated the Saturday before or that Sunday; in before 1:00 AM,
+//     out at/after 2:00 AM; a visit with the same in and out time never counts);
+//  b. the same Net OT computation with exactly 1:00 taken off Total OT would
+//     NOT flag under the same test (Net OT strictly over 8:00).
+// Anything else still flags. Live-In and override-rate OT flags are untouched.
+function dstFallCover(dval, tval){
+  const D = parseVisitDate(dval), T = parseVisitTime(tval);
+  if (!D || !T || T.outMin === T.inMin) return null;      // need real in/out times, not a 24 h / ambiguous visit
+  const d0 = dayNo(D.y, D.m0, D.d);
+  const inAbs = d0*1440 + T.inMin;
+  const outAbs = (T.outMin > T.inMin ? d0 : d0+1)*1440 + T.outMin;
+  const fall = dstNights(D.y).find(n => n.kind === "fall");
+  const nd = dayNo(fall.y, fall.m0, fall.d);
+  if (d0 !== nd - 1 && d0 !== nd) return null;             // Saturday overnight or the Sunday itself
+  if (inAbs < nd*1440 + fall.from && outAbs >= nd*1440 + fall.to){
+    const p2 = x => String(x).padStart(2,"0");
+    return {night:`${p2(fall.m0+1)}/${p2(fall.d)}/${fall.y}`, time:T.txt};
+  }
+  return null;
+}
+
 function runChecks(rows){
   // rows: array of arrays, index = pandas row index, col index = pandas column
   const cell = (r,c) => (rows[r] && rows[r][c] !== undefined) ? rows[r][c] : null;
@@ -251,6 +277,22 @@ function runChecks(rows){
         if (inSvc.has(pc.toLowerCase()) || looks) inSvcHours += (ph||0) + (oh||0);
       } catch(e) {}
     }
+    // v4: first real patient visit of this caregiver that covers 1:00-2:00 AM on the fall-back night
+    let fallCover = null;
+    for (const ri of sec){
+      if (fallCover) break;
+      if (exclude.has(ri) || totalIn.has(ri) || extra.has(ri)) continue;
+      try {
+        const pc = pyStr(cell(ri,15)).trim();
+        const pn = notNull(cell(ri,1)) ? pyStr(cell(ri,1)).trim() : "";
+        const pid = notNull(cell(ri,2)) ? pyStr(cell(ri,2)).trim() : "";
+        if (inSvc.has(pc.toLowerCase()) || !pn || !pid) continue;
+        const c = dstFallCover(cell(ri,3), cell(ri,6));
+        if (c){ const v = cell(ri,3); let ds = "";
+          if (v instanceof Date){ const p=n=>String(n).padStart(2,"0"); ds = `${p(v.getMonth()+1)}/${p(v.getDate())}/${v.getFullYear()}`; } else ds = String(v).trim();
+          fallCover = {...c, row:ri, pname:pn, pid:(pid.endsWith(".0") ? pid.slice(0,-2) : pid), date:ds}; }
+      } catch(e) {}
+    }
     for (const r of sec){
       if (exclude.has(r) || extra.has(r)) continue;
       let vds = "";
@@ -277,7 +319,12 @@ function runChecks(rows){
             push(code,name,r,"Overtime for caregiver with approved override rate",`Approved Rate: $${f2(APPROVED_RATES[name])} | Total OT: ${ots}`);
           const det = inSvcHours === 0 ? `Total OT: ${ots}` : `Total OT: ${ots} (In-Service: ${f2(inSvcHours)} hrs, Net OT: ${f2(net)} hrs)`;
           if (hasLiveIn){ if (net > 12) push(code,name,r,"Net OT hours for Live-In exceed 12:00",det); }
-          else { if (net > 8) push(code,name,r,"Net OT hours for Non-Live-In exceed 08:00",det); }
+          else { if (net > 8){
+            const netNoHour = Math.max((ot - 1) - inSvcHours, 0);   // same computation, exactly 1:00 taken off Total OT
+            if (fallCover && !(netNoHour > 8))
+              dstSkipped.push({kind:"fallot", night:fallCover.night, code, name, row:r, ots, otMin:Math.round(ot*60), inSvcHours, net, netNoHour, detail:det, cover:fallCover});
+            else push(code,name,r,"Net OT hours for Non-Live-In exceed 08:00",det);
+          } }
         }
       } else {
         let pn="", pid="";
@@ -291,7 +338,12 @@ function runChecks(rows){
         const looks = sc === "0" && !pid && vh !== null && vh === 0;
         const nonPay = pc.toLowerCase().includes("non payable");
         if (nonPay && looks) isIn = true;
-        if (nonPay) push(code,name,r,`${isIn?"In-Service":"Visit"} marked as Non Payable - ${vds}`, pyStr(cell(r,15)));
+        // v4: an IN-SERVICE row marked Non Payable is intentional (training done at another agency): skip it.
+        // A Non Payable row's pay code is "Non Payable", so (exactly like the script) it is classed as in-service
+        // only by the structural signs: Serv. Code 0, no Adm. ID, Visit Hrs 0:00. Any other Non Payable row
+        // (a real visit) still flags as "Visit marked as Non Payable".
+        if (nonPay && isIn) dstSkipped.push({kind:"nonpaysvc", code, name, row:r, date:vds, time:(parseVisitTime(cell(r,6))||{txt:""}).txt, pay:phs, note:pn, problem:`In-Service marked as Non Payable - ${vds}`});
+        else if (nonPay) push(code,name,r,`${isIn?"In-Service":"Visit"} marked as Non Payable - ${vds}`, pyStr(cell(r,15)));
         if (!isIn && pn && pid && vds && tph > 0){
           const k = pid + "\u0001" + vds;
           if (!patientDay.has(k)) patientDay.set(k,{pid, dos:vds, pname:pn, entries:[]});
@@ -402,22 +454,38 @@ function render(){
 
 // Clock-change (DST) notice: shown ONLY when something was skipped.
 // v3: one notice per clock-change night, counting BOTH kinds as problems (flag rows).
+// v4: also counts the overtime kind.
 function renderDST(list){
   const box = document.getElementById("dstBox");
   if (!list.length){ box.classList.add("hidden"); box.innerHTML = ""; return; }
+  const svc = list.filter(s => s.kind === "nonpaysvc");          // v4: not clock-change related
   const groups = new Map();
-  for (const s of list){ const season = s.kind === "spring" ? "spring" : "fall"; const k = season + "|" + s.night; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
+  for (const s of list.filter(s => s.kind !== "nonpaysvc")){ const season = s.kind === "spring" ? "spring" : "fall"; const k = season + "|" + s.night; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
   const md = d => { const [m,dd,y] = d.split("/"); return `${+m}/${+dd}/${y}`; };
   const shortD = v => { const m = String(v).match(/^(\d{1,2})\/(\d{1,2})/); return m ? `${+m[1]}/${+m[2]}` : v; };
   const t = s => s ? `${s.slice(0,2)}:${s.slice(2,4)}–${s.slice(5,7)}:${s.slice(7,9)}` : "";
   const hm = m => `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}`;
   const pl = (n, w) => `${n} ${w}${n===1?"":"s"}`;
+  const svcList = () => {
+    if (!svc.length) return "";
+    const lis = svc.map(s => {
+      const note = s.note ? (s.note.length > 90 ? s.note.slice(0,90) + "…" : s.note) : "";
+      return `<li><b>${esc(s.code)}</b> ${esc(s.name)} · in-service, non-payable on purpose<br><span class="m">${esc(shortD(s.date))}${s.time ? " · " + t(s.time) : ""} · ${esc(s.pay)} hrs${note ? " · " + esc(note) : ""}</span></li>`;
+    }).join("");
+    return `<div class="dh">In-Service marked as Non Payable (${svc.length}): in-service, non-payable on purpose</div><ul>${lis}</ul>`;
+  };
   let html = "";
+  if (!groups.size){
+    const n = svc.length;
+    html = `<div>ℹ️ <b>${pl(n,"problem")} ${n===1?"was":"were"} skipped</b> (${n} in-service): in-service hours marked non-payable on purpose. This is expected, so ${n===1?"it is not a real problem":"they are not real problems"}. <a href="#" class="dstT">Show them</a><div class="dl hidden">${svcList()}</div></div>`;
+  }
+  let first = true;
   for (const [k, items] of groups){
-    const fall = k.startsWith("fall"), night = md(items[0].night), n = items.length;
-    const pv = items.filter(s => s.kind !== "fallday"), pd = items.filter(s => s.kind === "fallday");
-    const parts = []; if (pv.length) parts.push(`${pv.length} pay-vs-billed`); if (pd.length) parts.push(`${pd.length} patient-day`);
-    const head = `ℹ️ <b>${pl(n,"problem")} ${n===1?"was":"were"} skipped</b> (${parts.join(" + ")}) because of the clock change on Sun ${night} (${fall?"1–2 AM happened twice":"2–3 AM never happened"}). This is expected, so ${n===1?"it is not a real problem":"they are not real problems"}.`;
+    const withSvc = first && svc.length > 0; first = false;
+    const fall = k.startsWith("fall"), night = md(items[0].night), n = items.length + (withSvc ? svc.length : 0);
+    const pv = items.filter(s => s.kind !== "fallday" && s.kind !== "fallot"), pd = items.filter(s => s.kind === "fallday"), po = items.filter(s => s.kind === "fallot");
+    const parts = []; if (pv.length) parts.push(`${pv.length} pay-vs-billed`); if (pd.length) parts.push(`${pd.length} patient-day`); if (po.length) parts.push(`${po.length} overtime`); if (withSvc) parts.push(`${svc.length} in-service`);
+    const head = `ℹ️ <b>${pl(n,"problem")} ${n===1?"was":"were"} skipped</b> (${parts.join(" + ")}) because of the clock change on Sun ${night} (${fall?"1–2 AM happened twice":"2–3 AM never happened"})${withSvc ? ", plus in-service hours marked non-payable on purpose" : ""}. This is expected, so ${n===1?"it is not a real problem":"they are not real problems"}.`;
     let lists = "";
     if (pv.length){
       const lis = pv.map(s => {
@@ -436,6 +504,16 @@ function renderDST(list){
       }).join("");
       lists += `<div class="dh">Patient day over 24:00 (${pl(pd.length,"problem")}, ${pl(days.size,"patient day")}): back under 24:00 once the extra hour is taken off</div><ul>${lis}</ul>`;
     }
+    if (po.length){
+      const h2 = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
+      const lis = po.map(s => {
+        const c = s.cover;
+        const isv = s.inSvcHours ? ` (Net ${h2(Math.round(s.net*60))} after In-Service; Net ${h2(Math.round(s.netNoHour*60))} without the hour)` : "";
+        return `<li><b>${esc(s.code)}</b> ${esc(s.name)} · Total OT ${esc(s.ots)}, ${h2(s.otMin - 60)} without the extra hour${isv}<br><span class="m">Covering visit: ${esc(c.pname)} (${esc(c.pid)}) · ${esc(shortD(c.date))} · ${t(c.time)}</span></li>`;
+      }).join("");
+      lists += `<div class="dh">Overtime over 8:00 (${po.length}): 8:00 or under once the extra hour is taken off</div><ul>${lis}</ul>`;
+    }
+    if (withSvc) lists += svcList();
     html += `<div>${head} <a href="#" class="dstT">Show them</a><div class="dl hidden">${lists}</div></div>`;
   }
   box.innerHTML = html; box.classList.remove("hidden");
