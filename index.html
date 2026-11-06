@@ -35,6 +35,7 @@ h1{margin:18px 0 4px;font-size:clamp(28px,4.5vw,40px);letter-spacing:-.03em;colo
 .dst ul{margin:10px 0 0;padding:0;list-style:none}
 .dst li{background:#fff;border:1px solid #dbe7f6;border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
 .dst li b{color:#12304d}.dst .m{color:#5b6f86}
+.dst .dh{font-weight:700;color:#12304d;margin-top:12px;font-size:13px}
 .hidden{display:none}
 footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
 .copied{background:#1b7f3b !important;color:#fff !important}
@@ -61,7 +62,7 @@ footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
     <div id="emailBox"></div>
   </div>
 </div>
-<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v2</footer>
+<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v3</footer>
 </div>
 <script>
 
@@ -126,6 +127,14 @@ function f2(x){ return x.toFixed(2); }
 //     (same 15-min unit), i.e. the system did not count the extra hour;
 //  3. Pay (reg + OT) minus Visit Hrs is EXACTLY +4 units (fall) or
 //     EXACTLY -4 units (spring). Anything else still flags.
+// v3 adds: a "Patient day exceeds 24:00" flag is skipped ONLY when ALL hold:
+//  a. the patient day's date is the fall-back night (the Saturday before,
+//     or the 1st Sunday of November itself; computed, no fixed dates);
+//  b. at least one visit in that patient day covers the whole 1:00-2:00 AM
+//     hour on that night (in before 1:00 AM, out at/after 2:00 AM, under 24 h);
+//  c. the day total minus exactly 1 hour would NOT flag under the same
+//     test as the normal check (total pay + OT strictly over 24:00).
+//  A day still over 24:00 after removing 1 hour keeps flagging.
 // ============================================================
 function nthSunday(y, m0, n){ const d = new Date(y, m0, 1); return 1 + ((7 - d.getDay()) % 7) + 7*(n-1); }
 function dstNights(y){
@@ -169,6 +178,29 @@ function dstExplains(dateVal, timeVal, visitHrs, payHrsTotal){
         const p2 = x => String(x).padStart(2,"0");
         return {kind:n.kind, night:`${p2(n.m0+1)}/${p2(n.d)}/${n.y}`, diffUnits:diff, time:T.txt};
       }
+    }
+  }
+  return null;
+}
+
+// v3: patient-day (all caregivers) total over 24:00 on the fall-back night.
+// entries: [{dval, tval, tph}] ; tot = same float sum the normal check uses.
+function dstPatientDay(entries, tot){
+  if (!(tot > 24)) return null;                           // not flagged anyway
+  const totMin = Math.round(tot*60), afterMin = totMin - 60;
+  if (afterMin / 60 > 24) return null;                    // rule c: still over 24:00 without the extra hour
+  for (const e of entries){
+    const D = parseVisitDate(e.dval), T = parseVisitTime(e.tval);
+    if (!D || !T || T.outMin === T.inMin) continue;       // need real in/out times, not a 24 h / ambiguous visit
+    const d0 = dayNo(D.y, D.m0, D.d);
+    const inAbs = d0*1440 + T.inMin;
+    const outAbs = (T.outMin > T.inMin ? d0 : d0+1)*1440 + T.outMin;
+    const fall = dstNights(D.y).find(n => n.kind === "fall");
+    const nd = dayNo(fall.y, fall.m0, fall.d);
+    if (d0 !== nd - 1 && d0 !== nd) continue;             // rule a: Saturday overnight or the Sunday itself
+    if (inAbs < nd*1440 + fall.from && outAbs >= nd*1440 + fall.to){   // rule b
+      const p2 = x => String(x).padStart(2,"0");
+      return {kind:"fall", night:`${p2(fall.m0+1)}/${p2(fall.d)}/${fall.y}`, totMin, afterMin, time:T.txt, coverCode:e.code, coverName:e.name};
     }
   }
   return null;
@@ -263,7 +295,7 @@ function runChecks(rows){
         if (!isIn && pn && pid && vds && tph > 0){
           const k = pid + "\u0001" + vds;
           if (!patientDay.has(k)) patientDay.set(k,{pid, dos:vds, pname:pn, entries:[]});
-          patientDay.get(k).entries.push({code,name,row:r,pay:phs,ot:ohs,tph});
+          patientDay.get(k).entries.push({code,name,row:r,pay:phs,ot:ohs,tph,dval:cell(r,3),tval:cell(r,6)});
         }
         try {
           if (looks && !isIn && !nonPay)
@@ -301,6 +333,12 @@ function runChecks(rows){
   }
   for (const info of patientDay.values()){
     const tot = info.entries.reduce((a,e)=>a+(e.tph||0),0);
+    const dpd = tot > 24 ? dstPatientDay(info.entries, tot) : null;
+    if (dpd){
+      for (const e of info.entries) dstSkipped.push({kind:"fallday", night:dpd.night, code:e.code, name:e.name, row:e.row, date:info.dos, pid:info.pid, pname:info.pname,
+        time:(parseVisitTime(e.tval)||{txt:""}).txt, pay:e.pay, ot:e.ot, totMin:dpd.totMin, afterMin:dpd.afterMin});
+      continue;
+    }
     if (tot > 24) for (const e of info.entries)
       push(e.code,e.name,e.row,`Patient day exceeds 24:00 - ${info.pname} (${info.pid}) - ${info.dos}`,`Day Total: ${f2(tot)} hrs | This Row Pay: ${e.pay}, OT: ${e.ot}`);
   }
@@ -363,23 +401,42 @@ function render(){
 }
 
 // Clock-change (DST) notice: shown ONLY when something was skipped.
+// v3: one notice per clock-change night, counting BOTH kinds as problems (flag rows).
 function renderDST(list){
   const box = document.getElementById("dstBox");
   if (!list.length){ box.classList.add("hidden"); box.innerHTML = ""; return; }
   const groups = new Map();
-  for (const s of list){ const k = s.kind + "|" + s.night; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
+  for (const s of list){ const season = s.kind === "spring" ? "spring" : "fall"; const k = season + "|" + s.night; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
   const md = d => { const [m,dd,y] = d.split("/"); return `${+m}/${+dd}/${y}`; };
   const shortD = v => { const m = String(v).match(/^(\d{1,2})\/(\d{1,2})/); return m ? `${+m[1]}/${+m[2]}` : v; };
-  const t = s => `${s.slice(0,2)}:${s.slice(2,4)}–${s.slice(5,7)}:${s.slice(7,9)}`;
+  const t = s => s ? `${s.slice(0,2)}:${s.slice(2,4)}–${s.slice(5,7)}:${s.slice(7,9)}` : "";
+  const hm = m => `${Math.floor(m/60)}:${String(m%60).padStart(2,"0")}`;
+  const pl = (n, w) => `${n} ${w}${n===1?"":"s"}`;
   let html = "";
   for (const [k, items] of groups){
     const fall = k.startsWith("fall"), night = md(items[0].night), n = items.length;
-    const head = `ℹ️ <b>${n} problem${n===1?" was":"s were"} skipped:</b> paid hours were exactly 1 hour ${fall?"more":"<b>less</b>"} than billed hours on the clock-change night (Sun ${night}, ${fall?"1–2 AM":"2–3 AM"}). This is expected because of daylight saving time, so ${n===1?"it is not a real problem":"they are not real problems"}.`;
-    const lis = items.map(s => {
-      const ot = (s.ot && s.ot !== "0:00" && s.ot !== "00:00") ? ` (${s.pay} + OT ${s.ot})` : "";
-      return `<li><b>${esc(s.code)}</b> ${esc(s.name)}<br><span class="m">${esc(shortD(s.date))} · ${t(s.time)} · Billed ${esc(s.visit)} · Paid ${esc(fmtHM(s))}${esc(ot)}</span></li>`;
-    }).join("");
-    html += `<div>${head} <a href="#" class="dstT">Show them</a><ul class="hidden">${lis}</ul></div>`;
+    const pv = items.filter(s => s.kind !== "fallday"), pd = items.filter(s => s.kind === "fallday");
+    const parts = []; if (pv.length) parts.push(`${pv.length} pay-vs-billed`); if (pd.length) parts.push(`${pd.length} patient-day`);
+    const head = `ℹ️ <b>${pl(n,"problem")} ${n===1?"was":"were"} skipped</b> (${parts.join(" + ")}) because of the clock change on Sun ${night} (${fall?"1–2 AM happened twice":"2–3 AM never happened"}). This is expected, so ${n===1?"it is not a real problem":"they are not real problems"}.`;
+    let lists = "";
+    if (pv.length){
+      const lis = pv.map(s => {
+        const ot = (s.ot && s.ot !== "0:00" && s.ot !== "00:00") ? ` (${s.pay} + OT ${s.ot})` : "";
+        return `<li><b>${esc(s.code)}</b> ${esc(s.name)}<br><span class="m">${esc(shortD(s.date))} · ${t(s.time)} · Billed ${esc(s.visit)} · Paid ${esc(fmtHM(s))}${esc(ot)}</span></li>`;
+      }).join("");
+      lists += `<div class="dh">Pay vs billed (${pv.length}): paid exactly 1 hour ${fall?"more":"<b>less</b>"} than billed</div><ul>${lis}</ul>`;
+    }
+    if (pd.length){
+      const days = new Map();
+      for (const s of pd){ const dk = s.pid + "|" + s.date; if (!days.has(dk)) days.set(dk, []); days.get(dk).push(s); }
+      const lis = [...days.values()].map(rs => {
+        const f = rs[0];
+        const cg = rs.map(s => `${esc(s.code)} ${esc(s.name)} · ${t(s.time)} · Paid ${esc(fmtHM(s))}`).join("<br>");
+        return `<li><b>${esc(f.pname)}</b> (${esc(f.pid)}) · ${esc(shortD(f.date))} · Day ${hm(f.totMin)}, ${hm(f.afterMin)} without the extra hour<br><span class="m">${cg}</span></li>`;
+      }).join("");
+      lists += `<div class="dh">Patient day over 24:00 (${pl(pd.length,"problem")}, ${pl(days.size,"patient day")}): back under 24:00 once the extra hour is taken off</div><ul>${lis}</ul>`;
+    }
+    html += `<div>${head} <a href="#" class="dstT">Show them</a><div class="dl hidden">${lists}</div></div>`;
   }
   box.innerHTML = html; box.classList.remove("hidden");
   box.querySelectorAll("a.dstT").forEach(a => a.onclick = e => { e.preventDefault(); const ul = a.nextElementSibling; const hid = ul.classList.toggle("hidden"); a.textContent = hid ? "Show them" : "Hide"; });
