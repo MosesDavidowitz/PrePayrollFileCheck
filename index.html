@@ -30,6 +30,11 @@ h1{margin:18px 0 4px;font-size:clamp(28px,4.5vw,40px);letter-spacing:-.03em;colo
 .x:hover{color:#b00020}
 .act{width:100%;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px}
 .tools th.t,.tools td.t{background:#faf6fb;border:1px solid #e9e1eb !important}
+.dst{background:#eef5ff;border:1px solid #c9dcf5;color:#1d3b5c;border-radius:16px;padding:14px 16px;margin-bottom:18px;font-size:14px;line-height:1.45}
+.dst a{color:#1f5fa8;font-weight:700;white-space:nowrap}
+.dst ul{margin:10px 0 0;padding:0;list-style:none}
+.dst li{background:#fff;border:1px solid #dbe7f6;border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
+.dst li b{color:#12304d}.dst .m{color:#5b6f86}
 .hidden{display:none}
 footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
 .copied{background:#1b7f3b !important;color:#fff !important}
@@ -46,6 +51,7 @@ footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
 </div>
 
 <div id="results" class="hidden">
+  <div id="dstBox" class="dst hidden"></div>
   <div class="card">
     <div class="row"><div><div class="label">Subject</div><div class="subject" id="subject">Pre-payroll file review results (FYI)</div></div>
     <button class="btn ghost" id="copySubject">Copy subject</button></div>
@@ -55,7 +61,7 @@ footer{color:#a094a4;font-size:11px;text-align:center;padding:26px 0 40px}
     <div id="emailBox"></div>
   </div>
 </div>
-<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v1</footer>
+<footer>A Davidowitz Project © <span id="yr">2026</span> · Pre-Payroll Check v2</footer>
 </div>
 <script>
 
@@ -104,6 +110,70 @@ function parseHHMM(value){
 }
 function f2(x){ return x.toFixed(2); }
 
+
+// ============================================================
+// DAYLIGHT-SAVING (clock change) SKIP  — v2
+// No hard-coded dates: the transition nights are computed per year
+// (US / America/New_York rule): spring forward = 2nd Sunday of March
+// at 2:00 AM (2:00-3:00 never happens, worked time is 1 h SHORTER than
+// the clock difference); fall back = 1st Sunday of November at 2:00 AM
+// (1:00-2:00 happens twice, worked time is 1 h LONGER).
+// A "Pay hours exceed visit hours" flag is skipped ONLY when ALL hold:
+//  1. the visit's in/out times cover the whole changed hour on that night
+//     (in before 1:00 AM and out at/after 2:00 AM for fall; in before
+//     2:00 AM and out at/after 3:00 AM for spring), shift under 24 h;
+//  2. Visit Hrs equals the plain clock difference of the in/out times
+//     (same 15-min unit), i.e. the system did not count the extra hour;
+//  3. Pay (reg + OT) minus Visit Hrs is EXACTLY +4 units (fall) or
+//     EXACTLY -4 units (spring). Anything else still flags.
+// ============================================================
+function nthSunday(y, m0, n){ const d = new Date(y, m0, 1); return 1 + ((7 - d.getDay()) % 7) + 7*(n-1); }
+function dstNights(y){
+  return [
+    {kind:"fall",   y, m0:10, d:nthSunday(y,10,1), from:60,  to:120, units:+4},
+    {kind:"spring", y, m0:2,  d:nthSunday(y,2,2),  from:120, to:180, units:-4}
+  ];
+}
+function parseVisitDate(v){
+  if (v instanceof Date) return {y:v.getFullYear(), m0:v.getMonth(), d:v.getDate()};
+  const s = String(v==null?"":v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (m) return {y:+m[3], m0:+m[1]-1, d:+m[2]};
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return {y:+m[1], m0:+m[2]-1, d:+m[3]};
+  return null;
+}
+function parseVisitTime(v){
+  const m = String(v==null?"":v).trim().match(/^(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})$/);
+  if (!m) return null;
+  const a = +m[1]*60 + +m[2], b = +m[3]*60 + +m[4];
+  if (+m[1] > 23 || +m[3] > 23 || +m[2] > 59 || +m[4] > 59) return null;
+  return {inMin:a, outMin:b, txt:`${m[1]}${m[2]}-${m[3]}${m[4]}`};
+}
+const UNIT = mins => Math.round(mins / 15);
+// days since epoch for a calendar date (timezone-free)
+const dayNo = (y,m0,d) => Math.round(Date.UTC(y,m0,d) / 86400000);
+function dstExplains(dateVal, timeVal, visitHrs, payHrsTotal){
+  const D = parseVisitDate(dateVal), T = parseVisitTime(timeVal);
+  if (!D || !T || visitHrs === null || !(payHrsTotal > 0)) return null;
+  if (T.outMin === T.inMin) return null;                 // 24 h / ambiguous: never skip
+  const d0 = dayNo(D.y, D.m0, D.d);
+  const inAbs = d0*1440 + T.inMin;
+  const outAbs = (T.outMin > T.inMin ? d0 : d0+1)*1440 + T.outMin;
+  const spanMin = outAbs - inAbs;                        // plain clock difference
+  const visitMin = Math.round(visitHrs*60), payMin = Math.round(payHrsTotal*60);
+  if (UNIT(visitMin) !== UNIT(spanMin)) return null;     // rule 2
+  const diff = UNIT(payMin) - UNIT(visitMin);
+  for (const y of new Set([D.y, D.y+1])){
+    for (const n of dstNights(y)){
+      const nd = dayNo(n.y, n.m0, n.d);
+      if (inAbs < nd*1440 + n.from && outAbs >= nd*1440 + n.to && diff === n.units){   // rules 1 + 3
+        const p2 = x => String(x).padStart(2,"0");
+        return {kind:n.kind, night:`${p2(n.m0+1)}/${p2(n.d)}/${n.y}`, diffUnits:diff, time:T.txt};
+      }
+    }
+  }
+  return null;
+}
+
 function runChecks(rows){
   // rows: array of arrays, index = pandas row index, col index = pandas column
   const cell = (r,c) => (rows[r] && rows[r][c] !== undefined) ? rows[r][c] : null;
@@ -118,6 +188,7 @@ function runChecks(rows){
   const inSvc = new Set(IN_SERVICE_PAY_CODES.map(c=>c.toLowerCase()));
   const liveIn = ["T1020","T1020:TV"];
   const problems = [];
+  const dstSkipped = [];
   const patientDay = new Map();
   const push = (code,name,row,problem,detail) => problems.push({code,name,row,problem,detail:String(detail)});
 
@@ -201,7 +272,11 @@ function runChecks(rows){
             push(code,name,r,`Live-In visit is less than 13:00 - ${vds}`, vhs);
           if (!isIn && !looks && tph > 0 && vh !== null){
             let vb = Math.trunc(vh); if (vh > vb) vb += 1;
-            if (tph > vb) push(code,name,r,`Pay hours exceed visit hours - ${vds}`,`Pay: ${phs}, OT: ${ohs}, Visit: ${vhs}`);
+            if (tph > vb){
+              const dst = dstExplains(cell(r,3), cell(r,6), vh, tph);
+              if (dst) dstSkipped.push({code,name,row:r,date:vds,time:dst.time,pay:phs,ot:ohs,visit:vhs,kind:dst.kind,night:dst.night,diffUnits:dst.diffUnits});
+              else push(code,name,r,`Pay hours exceed visit hours - ${vds}`,`Pay: ${phs}, OT: ${ohs}, Visit: ${vhs}`);
+            }
           }
         } catch(e){}
       }
@@ -229,6 +304,7 @@ function runChecks(rows){
     if (tot > 24) for (const e of info.entries)
       push(e.code,e.name,e.row,`Patient day exceeds 24:00 - ${info.pname} (${info.pid}) - ${info.dos}`,`Day Total: ${f2(tot)} hrs | This Row Pay: ${e.pay}, OT: ${e.ot}`);
   }
+  problems.dstSkipped = dstSkipped;
   return problems;
 }
 
@@ -285,6 +361,34 @@ function render(){
   setStatus(n ? `<span class="ok">${n} item${n===1?"":"s"} flagged</span>` + (rem?` · ${rem} removed · <a href="#" id="undo">undo</a>`:"") : '<span class="ok">No issues found</span>' + (rem?` · ${rem} removed · <a href="#" id="undo">undo</a>`:""));
   const u = document.getElementById("undo"); if (u) u.onclick = e=>{e.preventDefault(); ITEMS.forEach(i=>i.removed=false); render();};
 }
+
+// Clock-change (DST) notice: shown ONLY when something was skipped.
+function renderDST(list){
+  const box = document.getElementById("dstBox");
+  if (!list.length){ box.classList.add("hidden"); box.innerHTML = ""; return; }
+  const groups = new Map();
+  for (const s of list){ const k = s.kind + "|" + s.night; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
+  const md = d => { const [m,dd,y] = d.split("/"); return `${+m}/${+dd}/${y}`; };
+  const shortD = v => { const m = String(v).match(/^(\d{1,2})\/(\d{1,2})/); return m ? `${+m[1]}/${+m[2]}` : v; };
+  const t = s => `${s.slice(0,2)}:${s.slice(2,4)}–${s.slice(5,7)}:${s.slice(7,9)}`;
+  let html = "";
+  for (const [k, items] of groups){
+    const fall = k.startsWith("fall"), night = md(items[0].night), n = items.length;
+    const head = `ℹ️ <b>${n} problem${n===1?" was":"s were"} skipped:</b> paid hours were exactly 1 hour ${fall?"more":"<b>less</b>"} than billed hours on the clock-change night (Sun ${night}, ${fall?"1–2 AM":"2–3 AM"}). This is expected because of daylight saving time, so ${n===1?"it is not a real problem":"they are not real problems"}.`;
+    const lis = items.map(s => {
+      const ot = (s.ot && s.ot !== "0:00" && s.ot !== "00:00") ? ` (${s.pay} + OT ${s.ot})` : "";
+      return `<li><b>${esc(s.code)}</b> ${esc(s.name)}<br><span class="m">${esc(shortD(s.date))} · ${t(s.time)} · Billed ${esc(s.visit)} · Paid ${esc(fmtHM(s))}${esc(ot)}</span></li>`;
+    }).join("");
+    html += `<div>${head} <a href="#" class="dstT">Show them</a><ul class="hidden">${lis}</ul></div>`;
+  }
+  box.innerHTML = html; box.classList.remove("hidden");
+  box.querySelectorAll("a.dstT").forEach(a => a.onclick = e => { e.preventDefault(); const ul = a.nextElementSibling; const hid = ul.classList.toggle("hidden"); a.textContent = hid ? "Show them" : "Hide"; });
+}
+function fmtHM(s){
+  const toM = x => { const m = String(x||"").match(/^(\d+):(\d{2})$/); return m ? (+m[1])*60 + (+m[2]) : 0; };
+  const tot = toM(s.pay) + toM(s.ot);
+  return `${Math.floor(tot/60)}:${String(tot%60).padStart(2,"0")}`;
+}
 function setStatus(h){ document.getElementById("status").innerHTML = h; }
 
 async function copyRich(html, text, btn){
@@ -318,7 +422,9 @@ function loadFile(f){
       if (!ws){ setStatus(`<span class="err">Sheet "${SHEET_NAME}" not found. Is this the Pre-process Payroll Detail export?</span>`); return; }
       const ref = XLSX.utils.decode_range(ws["!ref"]);
       const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null, blankrows:true, range:{s:{r:0,c:0}, e:ref.e}});
-      ITEMS = runChecks(rows).map(p => ({...p, action:"", removed:false}));
+      const res = runChecks(rows);
+      ITEMS = res.map(p => ({...p, action:"", removed:false}));
+      renderDST(res.dstSkipped || []);
       document.getElementById("results").classList.remove("hidden");
       render();
     } catch(err){ setStatus(`<span class="err">Could not read the file: ${esc(err.message)}</span>`); }
